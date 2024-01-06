@@ -50,8 +50,8 @@ from tensorboardX import SummaryWriter
 # t_interval=10, save_log=False, save_results=False, scalar=5, seed=42, set_cost_bbox=5, set_cost_class=2, set_cost_giou=2, 
 # start_epoch=0, transformer_activation='prelu', two_stage=False, use_dn=True, use_lft=False, use_mqs=False, weight_decay=0.
 # 0001, world_size=1)
-
-outputPath = '/root/autodl-fs/outputs/DNDETR/'+str(datetime.datetime.now().strftime("%Y%m%d%H%M%S")) + "dn_dab_detr_withcdnonly"
+outputPath = '../../outputs/DNDETR/'+str(datetime.datetime.now().strftime("%Y%m%d%H%M%S")) + "dn_dab_detr_withcdnonly"
+#outputPath = '/root/autodl-fs/outputs/DNDETR/'+str(datetime.datetime.now().strftime("%Y%m%d%H%M%S")) + "dn_dab_detr_withcdnonly"
 if outputPath:
         Path(outputPath).mkdir(parents=True, exist_ok=True)
 import sys
