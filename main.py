@@ -30,6 +30,10 @@ from tensorboardX import SummaryWriter
 
 #python main.py -m dn_dab_detr --use_dn --finetune_ignore label_enc.weight class_embed --pretrain_model_path ./pretrained/dncheckpoint.pth
 
+
+#python main.py -m dn_dab_dino_deformable_detr --use_dn --finetune_ignore label_enc.weight class_embed --pretrain_model_path ./pretrained/deformable_dndetr_encoderonly.pth
+
+
 #find /root/autodl-tmp/outputs/DNDETR/ -type d -size -119c -exec rm -rf {} \;
 
 # args: Namespace(amp=False, aux_loss=True, backbone='resnet50', backbone_freeze_keywords=None, batch_
@@ -47,7 +51,7 @@ from tensorboardX import SummaryWriter
 # start_epoch=0, transformer_activation='prelu', two_stage=False, use_dn=True, use_lft=False, use_mqs=False, weight_decay=0.
 # 0001, world_size=1)
 
-outputPath = '/root/autodl-tmp/outputs/DNDETR/'+str(datetime.datetime.now().strftime("%Y%m%d%H%M%S")) + ""
+outputPath = '/root/autodl-fs/outputs/DNDETR/'+str(datetime.datetime.now().strftime("%Y%m%d%H%M%S")) + "dn_dab_detr_withcdnonly"
 if outputPath:
         Path(outputPath).mkdir(parents=True, exist_ok=True)
 import sys

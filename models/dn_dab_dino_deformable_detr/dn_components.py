@@ -58,7 +58,8 @@ def prepare_for_dn(dn_args, tgt_weight, embedweight, batch_size, training, num_q
     """
 
     if training:
-        targets, scalar, label_noise_scale, box_noise_scale, num_patterns, contrastive = dn_args
+        targets, scalar, label_noise_scale, box_noise_scale, num_patterns = dn_args
+        contrastive = True
     else:
         num_patterns = dn_args
 

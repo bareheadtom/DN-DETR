@@ -36,7 +36,7 @@ from .matcher import build_matcher
 from .segmentation import (DETRsegm, PostProcessPanoptic, PostProcessSegm,
                            dice_loss)
 from .transformer import build_transformer
-from .dn_components import prepare_for_dn, dn_post_process, compute_dn_loss
+from .dn_components2 import prepare_for_dn, dn_post_process, compute_dn_loss
 
 
 def sigmoid_focal_loss(inputs, targets, num_boxes, alpha: float = 0.25, gamma: float = 2):
@@ -114,6 +114,9 @@ class DABDETR(nn.Module):
         assert query_dim in [2, 4]
 
         self.refpoint_embed = nn.Embedding(num_queries, query_dim)
+
+        self.tgt_embed = nn.Embedding(num_queries, hidden_dim-1)
+
         self.random_refpoints_xy = random_refpoints_xy
         if random_refpoints_xy:
             # import ipdb; ipdb.set_trace()
@@ -170,11 +173,17 @@ class DABDETR(nn.Module):
         src, mask = features[-1].decompose()
         assert mask is not None
         # default pipeline
+        tgt_embed_weight = self.tgt_embed.weight
         embedweight = self.refpoint_embed.weight
         # prepare for dn
         input_query_label, input_query_bbox, attn_mask, mask_dict = \
-            prepare_for_dn(dn_args, embedweight, src.size(0), self.training, self.num_queries, self.num_classes,
+            prepare_for_dn(dn_args,tgt_embed_weight, embedweight, src.size(0), self.training, self.num_queries, self.num_classes,
                            self.hidden_dim, self.label_enc)
+        #torch.Size([305, 1, 256])   torch.Size([305, 1, 4])   torch.Size([305, 305])  {'known_indice': tensor([0, 0, 0, 0, 0], device='cuda:0'), 'batch_idx': tensor([0], device='cuda:0'), 'map_known_indice': tensor([0, 1, 2, 3, 4]), 'known_lbs_bboxes': (tensor([8, 8, 8, 8, 8], device='cuda:0'), tensor([[0.4541, 0.5911, 0.5684, 0.4948],
+        # [0.4541, 0.5911, 0.5684, 0.4948],
+        # [0.4541, 0.5911, 0.5684, 0.4948],
+        # [0.4541, 0.5911, 0.5684, 0.4948],
+        # [0.4541, 0.5911, 0.5684, 0.4948]], device='cuda:0')), 'know_idx': [tensor([[0]], device='cuda:0')], 'pad_size': 5}
 
         hs, reference = self.transformer(self.input_proj(src), mask, input_query_bbox, pos[-1], tgt=input_query_label,
                                          attn_mask=attn_mask)
