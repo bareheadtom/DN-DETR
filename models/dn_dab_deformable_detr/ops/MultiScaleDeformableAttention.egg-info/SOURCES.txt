@@ -1,7 +1,7 @@
 setup.py
-/root/autodl-fs/projects/DN-DETR/models/dn_dab_deformable_detr/ops/src/vision.cpp
-/root/autodl-fs/projects/DN-DETR/models/dn_dab_deformable_detr/ops/src/cpu/ms_deform_attn_cpu.cpp
-/root/autodl-fs/projects/DN-DETR/models/dn_dab_deformable_detr/ops/src/cuda/ms_deform_attn_cuda.cu
+/home/um202173632/suchangsheng/projects/DN-DETR/models/dn_dab_deformable_detr/ops/src/vision.cpp
+/home/um202173632/suchangsheng/projects/DN-DETR/models/dn_dab_deformable_detr/ops/src/cpu/ms_deform_attn_cpu.cpp
+/home/um202173632/suchangsheng/projects/DN-DETR/models/dn_dab_deformable_detr/ops/src/cuda/ms_deform_attn_cuda.cu
 MultiScaleDeformableAttention.egg-info/PKG-INFO
 MultiScaleDeformableAttention.egg-info/SOURCES.txt
 MultiScaleDeformableAttention.egg-info/dependency_links.txt

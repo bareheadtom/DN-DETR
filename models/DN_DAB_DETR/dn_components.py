@@ -111,12 +111,12 @@ def prepare_for_dn(dn_args, embedweight, batch_size, training, num_queries, num_
             diff = torch.zeros_like(known_bbox_expand)
             diff[:, :2] = known_bbox_expand[:, 2:] / 2
             diff[:, 2:] = known_bbox_expand[:, 2:]
-            # known_bbox_expand += torch.mul((torch.rand_like(known_bbox_expand) * 2 - 1.0),
-            #                                diff).cuda() * box_noise_scale
-            # known_bbox_expand = known_bbox_expand.clamp(min=0.0, max=1.0)
-            gaussian_noise = torch.randn_like(known_bbox_expand)
-            known_bbox_expand += torch.mul(torch.tanh(gaussian_noise), diff).cuda()*box_noise_scale
+            known_bbox_expand += torch.mul((torch.rand_like(known_bbox_expand) * 2 - 1.0),
+                                           diff).cuda() * box_noise_scale
             known_bbox_expand = known_bbox_expand.clamp(min=0.0, max=1.0)
+            # gaussian_noise = torch.randn_like(known_bbox_expand)
+            # known_bbox_expand += torch.mul(torch.tanh(gaussian_noise), diff).cuda()*box_noise_scale
+            # known_bbox_expand = known_bbox_expand.clamp(min=0.0, max=1.0)
             #print("known_bbox_expand",known_bbox_expand)
 
         #对label进行embed，准备好多余的， 然后给query300添加pad，将query 300扩充为batchsize 为什么添加pad呢

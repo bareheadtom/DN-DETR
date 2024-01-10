@@ -36,8 +36,10 @@ from .matcher import build_matcher
 from .segmentation import (DETRsegm, PostProcessPanoptic, PostProcessSegm,
                            dice_loss)
 from .transformer import build_transformer
-from .dn_components2 import prepare_for_dn, dn_post_process, compute_dn_loss
+from .dn_components import prepare_for_dn, dn_post_process, compute_dn_loss
 
+from models.enhance.PENet import PENet
+from models.DN_DAB_DETR.attention import MultiheadAttention
 
 def sigmoid_focal_loss(inputs, targets, num_boxes, alpha: float = 0.25, gamma: float = 2):
     """
@@ -76,6 +78,7 @@ class DABDETR(nn.Module):
                     query_dim=4, 
                     bbox_embed_diff_each_layer=False,
                     random_refpoints_xy=False,
+                    pre_encoder = None
                     ):
         """ Initializes the model.
         Parameters:
@@ -98,6 +101,8 @@ class DABDETR(nn.Module):
         self.hidden_dim = hidden_dim = transformer.d_model
         self.class_embed = nn.Linear(hidden_dim, num_classes)
         self.bbox_embed_diff_each_layer = bbox_embed_diff_each_layer
+
+        self.pre_encoder = pre_encoder
 
         # leave one dim for indicator
         self.label_enc = nn.Embedding(num_classes + 1, hidden_dim - 1)
@@ -124,6 +129,7 @@ class DABDETR(nn.Module):
             self.refpoint_embed.weight.data[:, :2] = inverse_sigmoid(self.refpoint_embed.weight.data[:, :2])
             self.refpoint_embed.weight.data[:, :2].requires_grad = False
 
+        #self.input_proj_pre = nn.Conv2d(3, hidden_dim, kernel_size=1)
         self.input_proj = nn.Conv2d(backbone.num_channels, hidden_dim, kernel_size=1)
         self.backbone = backbone
         self.aux_loss = aux_loss
@@ -149,6 +155,7 @@ class DABDETR(nn.Module):
             nn.init.constant_(self.bbox_embed.layers[-1].bias.data, 0)
 
 
+
     def forward(self, samples: NestedTensor, dn_args=None):
         """
             Add two functions prepare_for_dn and dn_post_process to implement dn
@@ -168,7 +175,17 @@ class DABDETR(nn.Module):
         """
         if isinstance(samples, (list, torch.Tensor)):
             samples = nested_tensor_from_tensor_list(samples)
+        
+        features_pre, pos_pre = self.backbone(samples)
+
+        if self.pre_encoder != None:
+            #print("samples.tensors.shape",samples.tensors.shape)
+            x = self.pre_encoder(samples.tensors)
+            samples.tensors = x
+
         features, pos = self.backbone(samples)
+
+        src_pre, mask_pre = features_pre[-1].decompose()
 
         src, mask = features[-1].decompose()
         assert mask is not None
@@ -177,7 +194,7 @@ class DABDETR(nn.Module):
         embedweight = self.refpoint_embed.weight
         # prepare for dn
         input_query_label, input_query_bbox, attn_mask, mask_dict = \
-            prepare_for_dn(dn_args,tgt_embed_weight, embedweight, src.size(0), self.training, self.num_queries, self.num_classes,
+            prepare_for_dn(dn_args, embedweight, src.size(0), self.training, self.num_queries, self.num_classes,
                            self.hidden_dim, self.label_enc)
         #torch.Size([305, 1, 256])   torch.Size([305, 1, 4])   torch.Size([305, 305])  {'known_indice': tensor([0, 0, 0, 0, 0], device='cuda:0'), 'batch_idx': tensor([0], device='cuda:0'), 'map_known_indice': tensor([0, 1, 2, 3, 4]), 'known_lbs_bboxes': (tensor([8, 8, 8, 8, 8], device='cuda:0'), tensor([[0.4541, 0.5911, 0.5684, 0.4948],
         # [0.4541, 0.5911, 0.5684, 0.4948],
@@ -185,7 +202,8 @@ class DABDETR(nn.Module):
         # [0.4541, 0.5911, 0.5684, 0.4948],
         # [0.4541, 0.5911, 0.5684, 0.4948]], device='cuda:0')), 'know_idx': [tensor([[0]], device='cuda:0')], 'pad_size': 5}
 
-        hs, reference = self.transformer(self.input_proj(src), mask, input_query_bbox, pos[-1], tgt=input_query_label,
+
+        hs, reference = self.transformer(self.input_proj(src_pre),pos_pre[-1],mask_pre,self.input_proj(src), mask, input_query_bbox, pos[-1], tgt=input_query_label,
                                          attn_mask=attn_mask)
         
         if not self.bbox_embed_diff_each_layer:
@@ -506,6 +524,15 @@ def build_DABDETR(args):
 
     transformer = build_transformer(args)
 
+    pre_encoder = None
+    if args.pre_encoder:
+
+
+        pre_encoder = PENet()
+        print(" use PENet as pre_encoder")
+    else:
+        print("not use pre_encoder")
+
     model = DABDETR(
         backbone,
         transformer,
@@ -515,6 +542,7 @@ def build_DABDETR(args):
         iter_update=True,
         query_dim=4,
         random_refpoints_xy=args.random_refpoints_xy,
+        pre_encoder = pre_encoder
     )
     if args.masks:
         model = DETRsegm(model, freeze_detr=(args.frozen_weights is not None))

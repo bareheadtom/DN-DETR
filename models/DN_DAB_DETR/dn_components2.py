@@ -79,8 +79,8 @@ def prepare_for_dn(dn_args, tgt_weight, embedweight, batch_size, training, num_q
             new_targets = []
             for t in targets:
                 new_t = {}
-                new_t['labels'] = torch.cat([t['labels'], torch.tensor(len(t['labels']) * [num_classes], dtype=torch.int64).cuda()], dim=0)
-                new_t['boxes'] = torch.cat([t['boxes'], t['boxes']], dim=0)
+                new_t['labels'] = torch.cat([t['labels'], torch.tensor(len(t['labels']) * [num_classes], dtype=torch.int64).cuda(),torch.tensor(len(t['labels']) * [num_classes], dtype=torch.int64).cuda()], dim=0)
+                new_t['boxes'] = torch.cat([t['boxes'], t['boxes'],t['boxes']], dim=0)
                 new_targets.append(new_t)
             targets = new_targets
         known = [(torch.ones_like(t['labels'])).cuda() for t in targets] # [ [ 1, 1], [1, 1, 1], ... ]
@@ -136,11 +136,16 @@ def prepare_for_dn(dn_args, tgt_weight, embedweight, batch_size, training, num_q
 
             if contrastive:
                 rand_sign = torch.randint_like(known_bbox_expand, low=0, high=2, dtype=torch.float32) * 2.0 - 1.0
-                rand_part = torch.rand_like(known_bbox_expand)
-                positive_idx = torch.tensor(range(len(boxes)//2)).long().cuda().unsqueeze(0).repeat(scalar, 1)
+                #rand_part = torch.rand_like(known_bbox_expand)
+                rand_part = torch.tanh(torch.randn_like(known_bbox_expand))
+                positive_idx = torch.tensor(range(len(boxes)//3)).long().cuda().unsqueeze(0).repeat(scalar, 1)
                 positive_idx += (torch.tensor(range(scalar)) * len(boxes)).long().cuda().unsqueeze(1)
                 positive_idx = positive_idx.flatten()
-                negative_idx = positive_idx + len(boxes)//2
+
+                negative_idx = torch.tensor(range(len(boxes)//3,len(boxes))).long().cuda().unsqueeze(0).repeat(scalar, 1)
+                negative_idx += (torch.tensor(range(scalar)) * len(boxes)).long().cuda().unsqueeze(1)
+                negative_idx = negative_idx.flatten()
+                #negative_idx = positive_idx + len(boxes)//2
                 rand_part[negative_idx] += 1.0
                 rand_part *= rand_sign
 

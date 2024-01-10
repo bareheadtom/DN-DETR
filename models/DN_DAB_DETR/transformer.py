@@ -110,19 +110,35 @@ class Transformer(nn.Module):
         if self.num_patterns > 0:
             self.patterns = nn.Embedding(self.num_patterns, d_model)
 
+        self.cross_attn = MultiheadAttention(d_model, nhead, dropout=0.1)
+
+
     def _reset_parameters(self):
         for p in self.parameters():
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
 
-    def forward(self, src, mask, refpoint_embed, pos_embed, tgt, attn_mask=None):
+    def with_pos_embed(self, tensor, pos: Optional[Tensor]):
+        return tensor if pos is None else tensor + pos
+
+    def forward(self, pre_src,pos_pre,mask_pre, src, mask, refpoint_embed, pos_embed, tgt, attn_mask=None):
         # flatten NxCxHxW to HWxNxC
         bs, c, h, w = src.shape
-        src = src.flatten(2).permute(2, 0, 1)
+        pre_src = pre_src.flatten(2).permute(2, 0, 1) #HWxNxC
+        pos_pre = pos_pre.flatten(2).permute(2, 0, 1)
+
+        src = src.flatten(2).permute(2, 0, 1) #HWxNxC
         pos_embed = pos_embed.flatten(2).permute(2, 0, 1)
+        
         # refpoint_embed = refpoint_embed.unsqueeze(1).repeat(1, bs, 1)
-        mask = mask.flatten(1)        
-        memory = self.encoder(src, src_key_padding_mask=mask, pos=pos_embed)
+        mask_pre = mask_pre.flatten(1)
+        mask = mask.flatten(1) 
+
+        z = self.cross_attn(self.with_pos_embed(src,pos_embed),self.with_pos_embed(pre_src,pos_pre),pre_src,key_padding_mask = mask_pre)
+
+        memory = self.encoder(z[0], src_key_padding_mask=mask, pos=pos_embed)
+
+        
 
         if self.num_patterns > 0:
             l = tgt.shape[0]

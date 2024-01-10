@@ -642,8 +642,8 @@ def build(image_set, args):
 
 def build_exdark(image_set, args):
     PATHS = {
-        "train": ('/root/autodl-tmp/Exdark/JPEGImages/IMGS', '/root/autodl-tmp/Exdark/cocoAnno/instances_exdark_train.json'),
-        "val": ('/root/autodl-tmp/Exdark/JPEGImages/IMGS', '/root/autodl-tmp/Exdark/cocoAnno/instances_exdark_val.json'),
+        "train": ('/home/um202173632/suchangsheng/Exdark/JPEGImages/IMGS', '/home/um202173632/suchangsheng/Exdark/cocoAnno/instances_exdark_train.json'),
+        "val": ('/home/um202173632/suchangsheng/Exdark/JPEGImages/IMGS', '/home/um202173632/suchangsheng/Exdark/cocoAnno/instances_exdark_val.json'),
     }
 
     aux_target_hacks_list = get_aux_target_hacks_list(image_set, args)
