@@ -176,16 +176,17 @@ class DABDETR(nn.Module):
         if isinstance(samples, (list, torch.Tensor)):
             samples = nested_tensor_from_tensor_list(samples)
         
-        features_pre, pos_pre = self.backbone(samples)
+        #features_pre, pos_pre = self.backbone(samples)
 
-        if self.pre_encoder != None:
-            #print("samples.tensors.shape",samples.tensors.shape)
-            x = self.pre_encoder(samples.tensors)
-            samples.tensors = x
+        # if self.pre_encoder != None:
+        #     #print("samples.tensors.shape",samples.tensors.shape)
+        #     #x = self.pre_encoder(samples.tensors)
+        #     _,_, x = self.pre_encoder(samples.tensors)
+        #     samples.tensors = x
 
         features, pos = self.backbone(samples)
 
-        src_pre, mask_pre = features_pre[-1].decompose()
+        #src_pre, mask_pre = features_pre[-1].decompose()
 
         src, mask = features[-1].decompose()
         assert mask is not None
@@ -203,7 +204,7 @@ class DABDETR(nn.Module):
         # [0.4541, 0.5911, 0.5684, 0.4948]], device='cuda:0')), 'know_idx': [tensor([[0]], device='cuda:0')], 'pad_size': 5}
 
 
-        hs, reference = self.transformer(self.input_proj(src_pre),pos_pre[-1],mask_pre,self.input_proj(src), mask, input_query_bbox, pos[-1], tgt=input_query_label,
+        hs, reference = self.transformer(self.input_proj(src), mask, input_query_bbox, pos[-1], tgt=input_query_label,
                                          attn_mask=attn_mask)
         
         if not self.bbox_embed_diff_each_layer:
@@ -497,7 +498,7 @@ class MLP(nn.Module):
         for i, layer in enumerate(self.layers):
             x = F.relu(layer(x)) if i < self.num_layers - 1 else layer(x)
         return x
-
+from models.enhance.IAT.model import IAT
 
 def build_DABDETR(args):
     # the `num_classes` naming here is somewhat misleading.
@@ -526,10 +527,24 @@ def build_DABDETR(args):
 
     pre_encoder = None
     if args.pre_encoder:
+        initfcfg = dict(type='Pretrained',checkpoint='/home/um202173632/suchangsheng/projects/DN-DETR/models/enhance/IAT/LOL_pretrain.pth')
+        checkpath = '/home/um202173632/suchangsheng/projects/DN-DETR/models/enhance/IAT/LOL_pretrain.pth'
+        pre_encoder = IAT(in_dim=3, with_global=True,init_cfg=initfcfg)
+        precheckpoint = torch.load(checkpath, map_location='cpu')
+        mystat = pre_encoder.state_dict()
+        precheckpoint_new = {}
+        precheckpoint_miss = {}
+        for k, v in precheckpoint.items():
+            if k in mystat and v.shape == mystat[k].shape:
+                precheckpoint_new[k] = v
+            else:
+                precheckpoint_miss[k] = v
+        print("miss pre_encoder precheckpoint_miss",precheckpoint_miss)
+        mystat.update(precheckpoint_new)
+        pre_encoder.load_state_dict(mystat)
 
-
-        pre_encoder = PENet()
-        print(" use PENet as pre_encoder")
+        # pre_encoder = PENet()
+        # print(" use PENet as pre_encoder")
     else:
         print("not use pre_encoder")
 

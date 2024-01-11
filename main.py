@@ -50,7 +50,7 @@ from tensorboardX import SummaryWriter
 # t_interval=10, save_log=False, save_results=False, scalar=5, seed=42, set_cost_bbox=5, set_cost_class=2, set_cost_giou=2, 
 # start_epoch=0, transformer_activation='prelu', two_stage=False, use_dn=True, use_lft=False, use_mqs=False, weight_decay=0.
 # 0001, world_size=1)
-outputPath = '../../outputs/DNDETR/'+str(datetime.datetime.now().strftime("%Y%m%d%H%M%S")) + "dn_dab_detr_withdnonly_penet"
+outputPath = '../../outputs/DNDETR/'+str(datetime.datetime.now().strftime("%Y%m%d%H%M%S")) + "dn_dab_detr_withdnonly_idcnn"
 #outputPath = '/root/autodl-fs/outputs/DNDETR/'+str(datetime.datetime.now().strftime("%Y%m%d%H%M%S")) + "dn_dab_detr_withcdnonly"
 if outputPath:
         Path(outputPath).mkdir(parents=True, exist_ok=True)
@@ -91,7 +91,7 @@ def get_args_parser():
     parser.add_argument('--lr_backbone', default=1e-5, type=float, 
                         help='learning rate for backbone')
 
-    parser.add_argument('--batch_size', default=3, type=int)
+    parser.add_argument('--batch_size', default=4, type=int)
     parser.add_argument('--weight_decay', default=1e-4, type=float)
     parser.add_argument('--epochs', default=100, type=int)
     parser.add_argument('--lr_drop', default=40, type=int)

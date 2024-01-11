@@ -84,8 +84,10 @@ class Transformer(nn.Module):
 
         encoder_layer = TransformerEncoderLayer(d_model, nhead, dim_feedforward,
                                                 dropout, activation, normalize_before)
+        encoder_layer_idcnn = TransformerEncoderLayer_idcnn(d_model, nhead, dim_feedforward,
+                                                dropout, activation, normalize_before)
         encoder_norm = nn.LayerNorm(d_model) if normalize_before else None
-        self.encoder = TransformerEncoder(encoder_layer, num_encoder_layers, encoder_norm)
+        self.encoder = TransformerEncoder(encoder_layer,encoder_layer_idcnn, num_encoder_layers, encoder_norm)
 
         decoder_layer = TransformerDecoderLayer(d_model, nhead, dim_feedforward,
                                                 dropout, activation, normalize_before, keep_query_pos=keep_query_pos)
@@ -110,7 +112,7 @@ class Transformer(nn.Module):
         if self.num_patterns > 0:
             self.patterns = nn.Embedding(self.num_patterns, d_model)
 
-        self.cross_attn = MultiheadAttention(d_model, nhead, dropout=0.1)
+        #self.cross_attn = MultiheadAttention(d_model, nhead, dropout=0.1)
 
 
     def _reset_parameters(self):
@@ -121,22 +123,23 @@ class Transformer(nn.Module):
     def with_pos_embed(self, tensor, pos: Optional[Tensor]):
         return tensor if pos is None else tensor + pos
 
-    def forward(self, pre_src,pos_pre,mask_pre, src, mask, refpoint_embed, pos_embed, tgt, attn_mask=None):
+    #def forward(self, pre_src,pos_pre,mask_pre, src, mask, refpoint_embed, pos_embed, tgt, attn_mask=None):
+    def forward(self, src, mask, refpoint_embed, pos_embed, tgt, attn_mask=None):
         # flatten NxCxHxW to HWxNxC
         bs, c, h, w = src.shape
-        pre_src = pre_src.flatten(2).permute(2, 0, 1) #HWxNxC
-        pos_pre = pos_pre.flatten(2).permute(2, 0, 1)
+        #pre_src = pre_src.flatten(2).permute(2, 0, 1) #HWxNxC
+        #pos_pre = pos_pre.flatten(2).permute(2, 0, 1)
 
         src = src.flatten(2).permute(2, 0, 1) #HWxNxC
         pos_embed = pos_embed.flatten(2).permute(2, 0, 1)
         
         # refpoint_embed = refpoint_embed.unsqueeze(1).repeat(1, bs, 1)
-        mask_pre = mask_pre.flatten(1)
+        #mask_pre = mask_pre.flatten(1)
         mask = mask.flatten(1) 
 
-        z = self.cross_attn(self.with_pos_embed(src,pos_embed),self.with_pos_embed(pre_src,pos_pre),pre_src,key_padding_mask = mask_pre)
+        #z = self.cross_attn(self.with_pos_embed(src,pos_embed),self.with_pos_embed(pre_src,pos_pre),pre_src,key_padding_mask = mask_pre)
 
-        memory = self.encoder(z[0], src_key_padding_mask=mask, pos=pos_embed)
+        memory = self.encoder(src, src_key_padding_mask=mask, pos=pos_embed, src_shape = (bs, c, h, w))
 
         
 
@@ -153,9 +156,11 @@ class Transformer(nn.Module):
 
 class TransformerEncoder(nn.Module):
 
-    def __init__(self, encoder_layer, num_layers, norm=None, d_model=256):
+    def __init__(self, encoder_layer,encoder_layer_idcnn, num_layers, norm=None, d_model=256):
         super().__init__()
         self.layers = _get_clones(encoder_layer, num_layers)
+        #self.layers[0] = encoder_layer_idcnn
+        self.encoder_layer_idcnn = encoder_layer_idcnn
         self.num_layers = num_layers
         self.query_scale = MLP(d_model, d_model, d_model, 2)
         self.norm = norm
@@ -163,9 +168,14 @@ class TransformerEncoder(nn.Module):
     def forward(self, src,
                 mask: Optional[Tensor] = None,
                 src_key_padding_mask: Optional[Tensor] = None,
-                pos: Optional[Tensor] = None):
+                pos: Optional[Tensor] = None,
+                src_shape = None
+                ):
         output = src
-
+        pos_scales = self.query_scale(output)
+        output = self.encoder_layer_idcnn(output, src_mask=mask,
+                           src_key_padding_mask=src_key_padding_mask, pos=pos*pos_scales, src_shape = src_shape)
+        
         for layer_id, layer in enumerate(self.layers):
             # rescale the content and pos sim
             pos_scales = self.query_scale(output)
@@ -304,7 +314,7 @@ class TransformerDecoder(nn.Module):
 
         return output.unsqueeze(0)
 
-
+#origin TransformerEncoderLayer
 class TransformerEncoderLayer(nn.Module):
 
     def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1,
@@ -342,6 +352,244 @@ class TransformerEncoderLayer(nn.Module):
         src = self.norm2(src)
         return src
 
+
+
+class MultiScaleDWConv(nn.Module):
+    def __init__(self, dim, scale=(1, 3, 5, 7)):
+        super().__init__()
+        self.scale = scale
+        self.channels = []
+        self.proj = nn.ModuleList()
+        for i in range(len(scale)):
+            if i == 0:
+                channels = dim - dim // len(scale) * (len(scale) - 1)
+            else:
+                channels = dim // len(scale)
+            conv = nn.Conv2d(channels, channels,
+                             kernel_size=scale[i],
+                             padding=scale[i]//2,
+                             groups=channels)
+            self.channels.append(channels)
+            self.proj.append(conv)
+            
+    def forward(self, x):
+        x = torch.split(x, split_size_or_sections=self.channels, dim=1)
+        out = []
+        for i, feat in enumerate(x):
+            out.append(self.proj[i](feat))
+        x = torch.cat(out, dim=1)
+        return x
+from mmcv.cnn.bricks import ConvModule, build_activation_layer, build_norm_layer
+class Mlp(nn.Module):  ### MS-FFN
+    """
+    Mlp implemented by with 1x1 convolutions.
+
+    Input: Tensor with shape [B, C, H, W].
+    Output: Tensor with shape [B, C, H, W].
+    Args:
+        in_features (int): Dimension of input features.
+        hidden_features (int): Dimension of hidden features.
+        out_features (int): Dimension of output features.
+        act_cfg (dict): The config dict for activation between pointwise
+            convolution. Defaults to ``dict(type='GELU')``.
+        drop (float): Dropout rate. Defaults to 0.0.
+    """
+
+    def __init__(self,
+                 in_features,
+                 hidden_features=None,
+                 out_features=None,
+                 act_cfg=dict(type='GELU'),
+                 drop=0,):
+        super().__init__()
+        out_features = out_features or in_features
+        hidden_features = hidden_features or in_features
+        self.fc1 = nn.Sequential(
+            nn.Conv2d(in_features, hidden_features, kernel_size=1, bias=False),
+            build_activation_layer(act_cfg),
+            nn.BatchNorm2d(hidden_features),
+        )
+        self.dwconv = MultiScaleDWConv(hidden_features)
+        self.act = build_activation_layer(act_cfg)
+        self.norm = nn.BatchNorm2d(hidden_features)
+        self.fc2 = nn.Sequential(
+            nn.Conv2d(hidden_features, in_features, kernel_size=1, bias=False),
+            nn.BatchNorm2d(in_features),
+        )
+        self.drop = nn.Dropout(drop)
+
+    def forward(self, x):
+        
+        x = self.fc1(x)
+
+        x = self.dwconv(x) + x
+        x = self.norm(self.act(x))
+        
+        x = self.drop(x)
+        x = self.fc2(x)
+        x = self.drop(x)
+
+        return x
+class LayerScale(nn.Module):
+    def __init__(self, dim, init_value=1e-5):
+        super().__init__()
+        self.weight = nn.Parameter(torch.ones(dim, 1, 1, 1)*init_value, 
+                                   requires_grad=True)
+        self.bias = nn.Parameter(torch.zeros(dim), requires_grad=True)
+
+    def forward(self, x):
+        x = F.conv2d(x, weight=self.weight, bias=self.bias, groups=x.shape[1])
+        return x
+
+class DynamicConv2d(nn.Module): ### IDConv
+    def __init__(self,
+                 dim,
+                 kernel_size=3,
+                 reduction_ratio=4,
+                 num_groups=1,
+                 bias=True):
+        super().__init__()
+        assert num_groups > 1, f"num_groups {num_groups} should > 1."
+        self.num_groups = num_groups
+        self.K = kernel_size
+        self.bias_type = bias
+        self.weight = nn.Parameter(torch.empty(num_groups, dim, kernel_size, kernel_size), requires_grad=True)
+        self.pool = nn.AdaptiveAvgPool2d(output_size=(kernel_size, kernel_size))
+        self.proj = nn.Sequential(
+            ConvModule(dim, 
+                       dim//reduction_ratio,
+                       kernel_size=1,
+                       norm_cfg=dict(type='BN2d'),
+                       act_cfg=dict(type='GELU'),),
+            nn.Conv2d(dim//reduction_ratio, dim*num_groups, kernel_size=1),)
+
+        if bias:
+            self.bias = nn.Parameter(torch.empty(num_groups, dim), requires_grad=True)
+        else:
+            self.bias = None
+
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        nn.init.trunc_normal_(self.weight, std=0.02)
+        if self.bias is not None:
+            nn.init.trunc_normal_(self.bias, std=0.02)
+
+    def forward(self, x):
+
+        B, C, H, W = x.shape
+        scale = self.proj(self.pool(x)).reshape(B, self.num_groups, C, self.K, self.K)
+        scale = torch.softmax(scale, dim=1)
+        weight = scale * self.weight.unsqueeze(0)
+        weight = torch.sum(weight, dim=1, keepdim=False)
+        weight = weight.reshape(-1, 1, self.K, self.K)
+
+        if self.bias is not None:
+            scale = self.proj(torch.mean(x, dim=[-2, -1], keepdim=True))
+            scale = torch.softmax(scale.reshape(B, self.num_groups, C), dim=1)
+            bias = scale * self.bias.unsqueeze(0)
+            bias = torch.sum(bias, dim=1).flatten(0)
+        else:
+            bias = None
+
+        x = F.conv2d(x.reshape(1, -1, H, W),
+                     weight=weight,
+                     padding=self.K//2,
+                     groups=B*C,
+                     bias=bias)
+        
+        return x.reshape(B, C, H, W)
+from timm.models.layers import DropPath, to_2tuple
+
+class TransformerEncoderLayer_idcnn(nn.Module):
+
+    def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1,
+                 activation="relu", normalize_before=False):
+        super().__init__()
+        self.self_attn = nn.MultiheadAttention(d_model//2, nhead, dropout=dropout)
+        # Implementation of Feedforward model
+        self.linear1 = nn.Linear(d_model, dim_feedforward)
+        self.dropout = nn.Dropout(dropout)
+        self.linear2 = nn.Linear(dim_feedforward, d_model)
+
+        self.norm1 = nn.LayerNorm(d_model)
+        self.norm2 = nn.LayerNorm(d_model)
+        self.dropout1 = nn.Dropout(dropout)
+        self.dropout2 = nn.Dropout(dropout)
+
+        self.activation = _get_activation_fn(activation)
+        self.normalize_before = normalize_before
+
+        self.local_unit = DynamicConv2d(
+            dim=d_model//2, kernel_size=3, num_groups=2)
+        dim = d_model
+        inner_dim = max(16, dim//8)
+        self.proj = nn.Sequential(
+            nn.Conv2d(dim, dim, kernel_size=3, padding=1, groups=dim),
+            nn.GELU(),
+            nn.BatchNorm2d(dim),
+            nn.Conv2d(dim, inner_dim, kernel_size=1),
+            nn.GELU(),
+            nn.BatchNorm2d(inner_dim),
+            nn.Conv2d(inner_dim, dim, kernel_size=1),
+            nn.BatchNorm2d(dim),)
+        mlp_hidden_dim = int(dim * 8)
+        drop_path = 0
+        self.drop_path = DropPath(
+            drop_path) if drop_path > 0. else nn.Identity()
+        
+        layer_scale_init_value= 1e-5
+        if layer_scale_init_value is not None:
+            self.layer_scale_1 = LayerScale(dim, layer_scale_init_value)
+            self.layer_scale_2 = LayerScale(dim, layer_scale_init_value)
+        else:
+            self.layer_scale_1 = nn.Identity()
+            self.layer_scale_2 = nn.Identity()
+        self.norm1 = build_norm_layer(dict(type='GN', num_groups=1), dim)[1]
+        self.norm2 = build_norm_layer(dict(type='GN', num_groups=1), dim)[1]
+        self.mlp = Mlp(in_features=dim,
+                       hidden_features=mlp_hidden_dim,
+                       act_cfg=dict(type='GELU'),
+                       drop=0,)
+
+    def with_pos_embed(self, tensor, pos: Optional[Tensor]):
+        return tensor if pos is None else tensor + pos
+
+    def forward(self,
+                     src,
+                     src_mask: Optional[Tensor] = None,
+                     src_key_padding_mask: Optional[Tensor] = None,
+                     pos: Optional[Tensor] = None,
+                     src_shape = None
+                     ):
+        bs,n,h,w = src_shape
+
+        x1, x2 = torch.chunk(src.permute(1,2,0).view(bs,-1,h,w), chunks=2, dim=1)
+        p1,p2 = torch.chunk(pos.permute(1,2,0).view(bs,-1,h,w), chunks=2, dim=1)
+        #x1 = x1.permute(1,2,0).view(bs,-1,h,w)
+        x1 = self.local_unit(x1)
+
+        src = x2.flatten(2).permute(2,0,1)
+        pos = p2.flatten(2).permute(2,0,1)
+
+        q = k = self.with_pos_embed(src, pos)
+        src2 = self.self_attn(q, k, value=src, attn_mask=src_mask,
+                              key_padding_mask=src_key_padding_mask)[0]
+        x2 = src2.permute(1,2,0).view(bs,-1,h,w)
+        x = torch.cat([x1, x2], dim=1)
+        x = self.proj(x) + x
+
+
+        x = x + self.drop_path(self.layer_scale_1(x))
+        x = x + self.drop_path(self.layer_scale_2(self.mlp(self.norm2(x))))
+        x = x.flatten(2).permute(2,0,1)
+        return x
+        # src = src + self.dropout1(src2)
+        # src = self.norm1(src)
+        # src2 = self.linear2(self.dropout(self.activation(self.linear1(src))))
+        # src = src + self.dropout2(src2)
+        # src = self.norm2(src)
+        # return src
 
 class TransformerDecoderLayer(nn.Module):
 
