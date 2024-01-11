@@ -56,7 +56,7 @@ if outputPath:
         Path(outputPath).mkdir(parents=True, exist_ok=True)
 import sys
 output_file_name = outputPath+"/out.log"
-file = open(output_file_name, "w+",buffering=2)
+file = open(output_file_name, "a+",buffering=2)
 sys.stdout = file
 summaryWriter = SummaryWriter(outputPath+'/tensorboardX')
 
@@ -93,7 +93,7 @@ def get_args_parser():
 
     parser.add_argument('--batch_size', default=4, type=int)
     parser.add_argument('--weight_decay', default=1e-4, type=float)
-    parser.add_argument('--epochs', default=100, type=int)
+    parser.add_argument('--epochs', default=300, type=int)
     parser.add_argument('--lr_drop', default=40, type=int)
     parser.add_argument('--override_resumed_lr_drop', default=False, action='store_true')
     parser.add_argument('--drop_lr_now', action="store_true", help="load checkpoint and drop for 12epoch setting")
