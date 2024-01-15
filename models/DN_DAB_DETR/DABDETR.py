@@ -78,7 +78,8 @@ class DABDETR(nn.Module):
                     query_dim=4, 
                     bbox_embed_diff_each_layer=False,
                     random_refpoints_xy=False,
-                    pre_encoder = None
+                    pre_encoder = None,
+                    two_stage = True
                     ):
         """ Initializes the model.
         Parameters:
@@ -154,6 +155,13 @@ class DABDETR(nn.Module):
             nn.init.constant_(self.bbox_embed.layers[-1].weight.data, 0)
             nn.init.constant_(self.bbox_embed.layers[-1].bias.data, 0)
 
+        self.two_stage = two_stage
+        # if two_stage:
+        #     # hack implementation for two-stage
+        #     self.transformer.decoder.class_embed = self.class_embed
+
+            
+
 
 
     def forward(self, samples: NestedTensor, dn_args=None):
@@ -185,6 +193,15 @@ class DABDETR(nn.Module):
         #     samples.tensors = x
 
         features, pos = self.backbone(samples)
+        features = [features[-1]]
+
+        srcs = []
+        masks = []
+        for l, feat in enumerate(features):
+            src,mask = feat.decompose()
+            srcs.append(self.input_proj(src))
+            masks.append(mask)
+            assert mask is not None
 
         #src_pre, mask_pre = features_pre[-1].decompose()
 
@@ -195,7 +212,7 @@ class DABDETR(nn.Module):
         embedweight = self.refpoint_embed.weight
         # prepare for dn
         input_query_label, input_query_bbox, attn_mask, mask_dict = \
-            prepare_for_dn(dn_args, embedweight, src.size(0), self.training, self.num_queries, self.num_classes,
+            prepare_for_dn(dn_args,tgt_embed_weight, embedweight, src.size(0), self.training, self.num_queries, self.num_classes,
                            self.hidden_dim, self.label_enc)
         #torch.Size([305, 1, 256])   torch.Size([305, 1, 4])   torch.Size([305, 305])  {'known_indice': tensor([0, 0, 0, 0, 0], device='cuda:0'), 'batch_idx': tensor([0], device='cuda:0'), 'map_known_indice': tensor([0, 1, 2, 3, 4]), 'known_lbs_bboxes': (tensor([8, 8, 8, 8, 8], device='cuda:0'), tensor([[0.4541, 0.5911, 0.5684, 0.4948],
         # [0.4541, 0.5911, 0.5684, 0.4948],
@@ -204,7 +221,7 @@ class DABDETR(nn.Module):
         # [0.4541, 0.5911, 0.5684, 0.4948]], device='cuda:0')), 'know_idx': [tensor([[0]], device='cuda:0')], 'pad_size': 5}
 
 
-        hs, reference = self.transformer(self.input_proj(src), mask, input_query_bbox, pos[-1], tgt=input_query_label,
+        hs, reference,enc_topk_logits, enc_topk_bboxes = self.transformer(srcs, masks, input_query_bbox, pos, tgt=input_query_label,
                                          attn_mask=attn_mask)
         
         if not self.bbox_embed_diff_each_layer:
@@ -228,6 +245,9 @@ class DABDETR(nn.Module):
         out = {'pred_logits': outputs_class[-1], 'pred_boxes': outputs_coord[-1]}
         if self.aux_loss:
             out['aux_outputs'] = self._set_aux_loss(outputs_class, outputs_coord)
+            if enc_topk_logits!= None and  enc_topk_bboxes != None:
+                out['aux_outputs'].extend(self._set_aux_loss([enc_topk_logits], [enc_topk_bboxes]))
+
         return out, mask_dict
 
     @torch.jit.unused

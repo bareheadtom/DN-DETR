@@ -29,7 +29,7 @@ from util.utils import clean_state_dict
 from tensorboardX import SummaryWriter
 
 #python main.py -m dn_dab_detr --use_dn --finetune_ignore label_enc.weight class_embed --pretrain_model_path ./pretrained/dncheckpoint.pth
-
+#python main.py -m dn_dab_detr --use_dn --finetune_ignore label_enc.weight class_embed --resume
 
 #python main.py -m dn_dab_dino_deformable_detr --use_dn --finetune_ignore label_enc.weight class_embed --pretrain_model_path ./pretrained/deformable_dndetr_encoderonly.pth
 
@@ -50,7 +50,7 @@ from tensorboardX import SummaryWriter
 # t_interval=10, save_log=False, save_results=False, scalar=5, seed=42, set_cost_bbox=5, set_cost_class=2, set_cost_giou=2, 
 # start_epoch=0, transformer_activation='prelu', two_stage=False, use_dn=True, use_lft=False, use_mqs=False, weight_decay=0.
 # 0001, world_size=1)
-outputPath = '../../outputs/DNDETR/'+str(datetime.datetime.now().strftime("%Y%m%d%H%M%S")) + "dn_dab_detr_withdnonly_idcnn"
+outputPath = '../../outputs/DNDETR/'+str(datetime.datetime.now().strftime("%Y%m%d%H%M%S")) + "dn_dab_detr_withdnonly_topkrt_learntgt"
 #outputPath = '/root/autodl-fs/outputs/DNDETR/'+str(datetime.datetime.now().strftime("%Y%m%d%H%M%S")) + "dn_dab_detr_withcdnonly"
 if outputPath:
         Path(outputPath).mkdir(parents=True, exist_ok=True)
@@ -155,7 +155,7 @@ def get_args_parser():
                         help="Random init the x,y of anchor boxes and freeze them.")
 
     # for DAB-Deformable-DETR
-    parser.add_argument('--two_stage', default=False, action='store_true', 
+    parser.add_argument('--two_stage', default=True, action='store_true', 
                         help="Using two stage variant for DAB-Deofrmable-DETR")
     parser.add_argument('--num_feature_levels', default=4, type=int, 
                         help='number of feature levels')
@@ -387,6 +387,27 @@ def main(args):
         _load_output = model_without_ddp.load_state_dict(_tmp_st, strict=False)
         logger.info(str(_load_output))
         # import ipdb; ipdb.set_trace()
+        
+        # print("load from pretrain model")
+        # mycheckpoint = checkpoint
+        
+        # mymodel_dict = model_without_ddp.state_dict()
+        
+        # mycheckpoint_model = mycheckpoint['model']
+        # mycheckpoint_model_new = {}
+        # miss_model_new = {}
+        # for k,v in mycheckpoint_model.items():
+        #     if k in mymodel_dict and v.shape == mymodel_dict[k].shape:
+        #         mycheckpoint_model_new[k] = v
+        #     else:
+        #         miss_model_new[k] = v
+
+        # print("\n****miss_model_new weight")
+        # for k,v in miss_model_new.items():
+        #     print(k,v.shape)
+        # mymodel_dict.update(mycheckpoint_model_new)
+        # _load_output = model_without_ddp.load_state_dict(mymodel_dict)
+        # logger.info(str(_load_output))
 
 
     if args.eval:
