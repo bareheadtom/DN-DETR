@@ -286,7 +286,8 @@ class TransformerEncoder(nn.Module):
         super().__init__()
         self.layers = _get_clones(encoder_layer, num_layers)
         #self.layers[0] = encoder_layer_idcnn
-        self.encoder_layer_idcnn = encoder_layer_idcnn
+        self.encoder_layer_idcnn_layers = _get_clones(encoder_layer_idcnn, 2)
+        #self.encoder_layer_idcnn = encoder_layer_idcnn
         self.num_layers = num_layers
         self.query_scale = MLP(d_model, d_model, d_model, 2)
         self.norm = norm
@@ -301,12 +302,16 @@ class TransformerEncoder(nn.Module):
         # pos_scales = self.query_scale(output)
         # output = self.encoder_layer_idcnn(output, src_mask=mask,
         #                    src_key_padding_mask=src_key_padding_mask, pos=pos*pos_scales, src_shape = src_shape)
-        
+        for layer_id, encoder_layer_idcnn in enumerate(self.encoder_layer_idcnn_layers):
+            pos_scales = self.query_scale(output)
+            output = encoder_layer_idcnn(output, src_mask=mask,
+                               src_key_padding_mask=src_key_padding_mask, pos=pos*pos_scales, src_shape = src_shape)
         for layer_id, layer in enumerate(self.layers):
             # rescale the content and pos sim
-            pos_scales = self.query_scale(output)
-            output = layer(output, src_mask=mask,
-                           src_key_padding_mask=src_key_padding_mask, pos=pos*pos_scales)
+            if layer_id >= 2:
+                pos_scales = self.query_scale(output)
+                output = layer(output, src_mask=mask,
+                            src_key_padding_mask=src_key_padding_mask, pos=pos*pos_scales)
 
         if self.norm is not None:
             output = self.norm(output)
