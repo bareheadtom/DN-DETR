@@ -40,7 +40,7 @@ from .dn_components import prepare_for_dn, dn_post_process, compute_dn_loss
 
 from models.enhance.PENet import PENet
 from models.DN_DAB_DETR.attention import MultiheadAttention
-
+from models.enhance.featenhancer.featenhancer import enhance_net_nopool
 def sigmoid_focal_loss(inputs, targets, num_boxes, alpha: float = 0.25, gamma: float = 2):
     """
     Loss used in RetinaNet for dense detection: https://arxiv.org/abs/1708.02002.
@@ -159,7 +159,7 @@ class DABDETR(nn.Module):
         # if two_stage:
         #     # hack implementation for two-stage
         #     self.transformer.decoder.class_embed = self.class_embed
-
+        self.enhance_net_nopool = enhance_net_nopool(backbone.num_channels,backbone.num_channels)
             
 
 
@@ -186,14 +186,17 @@ class DABDETR(nn.Module):
         
         #features_pre, pos_pre = self.backbone(samples)
 
-        # if self.pre_encoder != None:
-        #     #print("samples.tensors.shape",samples.tensors.shape)
-        #     #x = self.pre_encoder(samples.tensors)
-        #     _,_, x = self.pre_encoder(samples.tensors)
-        #     samples.tensors = x
+        if self.pre_encoder != None:
+            #print("samples.tensors.shape",samples.tensors.shape)
+            #x = self.pre_encoder(samples.tensors)
+            x = self.pre_encoder(samples.tensors)
+            samples.tensors = x
+        #print(torch.cuda.memory_allocated()/ (1024**3), samples.tensors.shape)
+        #print("max",torch.cuda.max_memory_allocated()/ (1024**3), samples.tensors.shape)
 
         features, pos = self.backbone(samples)
         features = [features[-1]]
+        
 
         srcs = []
         masks = []
@@ -206,6 +209,7 @@ class DABDETR(nn.Module):
         #src_pre, mask_pre = features_pre[-1].decompose()
 
         src, mask = features[-1].decompose()
+        src = self.enhance_net_nopool(src)
         assert mask is not None
         # default pipeline
         tgt_embed_weight = self.tgt_embed.weight
@@ -519,7 +523,7 @@ class MLP(nn.Module):
             x = F.relu(layer(x)) if i < self.num_layers - 1 else layer(x)
         return x
 from models.enhance.IAT.model import IAT
-
+from models.enhance.featenhancer.featenhancer import MultiScaleRepresentation
 def build_DABDETR(args):
     # the `num_classes` naming here is somewhat misleading.
     # it indeed corresponds to `max_obj_id + 1`, where max_obj_id
@@ -547,24 +551,26 @@ def build_DABDETR(args):
 
     pre_encoder = None
     if args.pre_encoder:
-        initfcfg = dict(type='Pretrained',checkpoint='/home/um202173632/suchangsheng/projects/DN-DETR/models/enhance/IAT/LOL_pretrain.pth')
-        checkpath = '/home/um202173632/suchangsheng/projects/DN-DETR/models/enhance/IAT/LOL_pretrain.pth'
-        pre_encoder = IAT(in_dim=3, with_global=True,init_cfg=initfcfg)
-        precheckpoint = torch.load(checkpath, map_location='cpu')
-        mystat = pre_encoder.state_dict()
-        precheckpoint_new = {}
-        precheckpoint_miss = {}
-        for k, v in precheckpoint.items():
-            if k in mystat and v.shape == mystat[k].shape:
-                precheckpoint_new[k] = v
-            else:
-                precheckpoint_miss[k] = v
-        print("miss pre_encoder precheckpoint_miss",precheckpoint_miss)
-        mystat.update(precheckpoint_new)
-        pre_encoder.load_state_dict(mystat)
+        # initfcfg = dict(type='Pretrained',checkpoint='/home/um202173632/suchangsheng/projects/DN-DETR/models/enhance/IAT/LOL_pretrain.pth')
+        # checkpath = '/home/um202173632/suchangsheng/projects/DN-DETR/models/enhance/IAT/LOL_pretrain.pth'
+        # pre_encoder = IAT(in_dim=3, with_global=True,init_cfg=initfcfg)
+        # precheckpoint = torch.load(checkpath, map_location='cpu')
+        # mystat = pre_encoder.state_dict()
+        # precheckpoint_new = {}
+        # precheckpoint_miss = {}
+        # for k, v in precheckpoint.items():
+        #     if k in mystat and v.shape == mystat[k].shape:
+        #         precheckpoint_new[k] = v
+        #     else:
+        #         precheckpoint_miss[k] = v
+        # print("miss pre_encoder precheckpoint_miss",precheckpoint_miss)
+        # mystat.update(precheckpoint_new)
+        # pre_encoder.load_state_dict(mystat)
+
+        pre_encoder = MultiScaleRepresentation()
 
         # pre_encoder = PENet()
-        # print(" use PENet as pre_encoder")
+        print(" use MultiScaleRepresentation as pre_encoder")
     else:
         print("not use pre_encoder")
 

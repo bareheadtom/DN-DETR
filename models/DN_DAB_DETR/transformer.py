@@ -246,11 +246,12 @@ class Transformer(nn.Module):
 
         enc_topk_logits = None
         enc_topk_bboxes = None
-        if self.two_stage:
+        if self.two_stage and memory.shape[0] >= self.num_queries:
             output_memory,output_proposals = self.gen_encoder_output_proposals(memory.transpose(0,1), mask_flatten, spatial_shapes)
             enc_outputs_class = self.enc_score_head(output_memory)
             enc_outputs_coord_unact = self.enc_bbox_head(output_memory) + output_proposals
             topk = self.num_queries
+            #print("enc_outputs_class.max(-1).values.shape, topk",enc_outputs_class.max(-1).values.shape, topk)
             topk_proposals = torch.topk(enc_outputs_class.max(-1).values,topk,dim=1)[1]
             topk_coords_unact =torch.gather(enc_outputs_coord_unact, 1, topk_proposals.unsqueeze(-1).repeat(1,1,enc_outputs_coord_unact.shape[-1]))
 
@@ -260,7 +261,7 @@ class Transformer(nn.Module):
             topk_coords_unact = topk_coords_unact.detach()
             #reference_points = topk_coords_unact.sigmoid()
             reference_points = topk_coords_unact.transpose(0,1)
-            refpoint_embed[:300,:,:] = reference_points
+            #refpoint_embed[:300,:,:] = reference_points
 
             target = torch.gather(output_memory, 1, topk_proposals.unsqueeze(-1).repeat(1,1,output_memory.shape[-1]))
             target = target.detach()
@@ -286,7 +287,7 @@ class TransformerEncoder(nn.Module):
         super().__init__()
         self.layers = _get_clones(encoder_layer, num_layers)
         #self.layers[0] = encoder_layer_idcnn
-        self.encoder_layer_idcnn_layers = _get_clones(encoder_layer_idcnn, 2)
+        #self.encoder_layer_idcnn_layers = _get_clones(encoder_layer_idcnn, 2)
         #self.encoder_layer_idcnn = encoder_layer_idcnn
         self.num_layers = num_layers
         self.query_scale = MLP(d_model, d_model, d_model, 2)
@@ -302,16 +303,16 @@ class TransformerEncoder(nn.Module):
         # pos_scales = self.query_scale(output)
         # output = self.encoder_layer_idcnn(output, src_mask=mask,
         #                    src_key_padding_mask=src_key_padding_mask, pos=pos*pos_scales, src_shape = src_shape)
-        for layer_id, encoder_layer_idcnn in enumerate(self.encoder_layer_idcnn_layers):
-            pos_scales = self.query_scale(output)
-            output = encoder_layer_idcnn(output, src_mask=mask,
-                               src_key_padding_mask=src_key_padding_mask, pos=pos*pos_scales, src_shape = src_shape)
+        # for layer_id, encoder_layer_idcnn in enumerate(self.encoder_layer_idcnn_layers):
+        #     pos_scales = self.query_scale(output)
+        #     output = encoder_layer_idcnn(output, src_mask=mask,
+        #                        src_key_padding_mask=src_key_padding_mask, pos=pos*pos_scales, src_shape = src_shape)
         for layer_id, layer in enumerate(self.layers):
             # rescale the content and pos sim
-            if layer_id >= 2:
-                pos_scales = self.query_scale(output)
-                output = layer(output, src_mask=mask,
-                            src_key_padding_mask=src_key_padding_mask, pos=pos*pos_scales)
+            #if layer_id >= 2:
+            pos_scales = self.query_scale(output)
+            output = layer(output, src_mask=mask,
+                        src_key_padding_mask=src_key_padding_mask, pos=pos*pos_scales)
 
         if self.norm is not None:
             output = self.norm(output)
