@@ -24,6 +24,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn, Tensor
 from .attention import MultiheadAttention
+from .multi_scale_transformer_layer import MultiScaleTransformerDecoderLayer
 
 class MLP(nn.Module):
     """ Very simple multi-layer perceptron (also called FFN)"""
@@ -78,7 +79,8 @@ class Transformer(nn.Module):
                  num_patterns=0,
                  modulate_hw_attn=True,
                  bbox_embed_diff_each_layer=False,
-                 two_stage=True
+                 two_stage=True,
+                 num_feature_levels=1,
                  ):
 
         super().__init__()
@@ -92,6 +94,11 @@ class Transformer(nn.Module):
 
         decoder_layer = TransformerDecoderLayer(d_model, nhead, dim_feedforward,
                                                 dropout, activation, normalize_before, keep_query_pos=keep_query_pos)
+        if num_feature_levels > 1:
+            decoder_layer = MultiScaleTransformerDecoderLayer(d_model, nhead, dim_feedforward,
+                                                dropout, activation, normalize_before, keep_query_pos=keep_query_pos, rm_self_attn_decoder=False,
+                                                num_feature_levels=num_feature_levels)
+        
         decoder_norm = nn.LayerNorm(d_model)
         self.decoder = TransformerDecoder(decoder_layer, num_decoder_layers, decoder_norm,
                                           return_intermediate=return_intermediate_dec,
@@ -226,9 +233,9 @@ class Transformer(nn.Module):
         valid_ratios = torch.stack([self.get_valid_ratio(m) for m in masks], 1)
 
 
-        src = srcs[0]
-        mask = masks[0]
-        pos_embed = pos_embeds[0]
+        src = srcs[-1]
+        mask = masks[-1]
+        pos_embed = pos_embeds[-1]
         bs, c, h, w = src.shape
         #pre_src = pre_src.flatten(2).permute(2, 0, 1) #HWxNxC
         #pos_pre = pos_pre.flatten(2).permute(2, 0, 1)
@@ -244,10 +251,14 @@ class Transformer(nn.Module):
 
         memory = self.encoder(src, src_key_padding_mask=mask, pos=pos_embed, src_shape = (bs, c, h, w))
 
+        replace_slice = memory.transpose(0,1)
+        start_index = src_flatten.size(1) - replace_slice.size(1)
+        src_flatten[:, start_index:, :] = replace_slice
+
         enc_topk_logits = None
         enc_topk_bboxes = None
         if self.two_stage and memory.shape[0] >= self.num_queries:
-            output_memory,output_proposals = self.gen_encoder_output_proposals(memory.transpose(0,1), mask_flatten, spatial_shapes)
+            output_memory,output_proposals = self.gen_encoder_output_proposals(src_flatten, mask_flatten, spatial_shapes)
             enc_outputs_class = self.enc_score_head(output_memory)
             enc_outputs_coord_unact = self.enc_bbox_head(output_memory) + output_proposals
             topk = self.num_queries
@@ -275,8 +286,11 @@ class Transformer(nn.Module):
             tgt[l - self.num_queries * self.num_patterns:] += \
                 self.patterns.weight[:, None, None, :].repeat(1, self.num_queries, bs, 1).flatten(0, 1)
 
-        hs, references = self.decoder(tgt, memory, tgt_mask=attn_mask, memory_key_padding_mask=mask,
-                          pos=pos_embed, refpoints_unsigmoid=refpoint_embed)
+        memory = src_flatten.transpose(0,1)
+        lvl_pos_embed_flatten = lvl_pos_embed_flatten.transpose(0,1)
+
+        hs, references = self.decoder(tgt, memory, tgt_mask=attn_mask, memory_key_padding_mask=mask_flatten,
+                          pos=lvl_pos_embed_flatten, refpoints_unsigmoid=refpoint_embed,level_start_index=level_start_index, spatial_shapes=spatial_shapes)
         return hs, references, enc_topk_logits, enc_topk_bboxes
 
 
@@ -320,12 +334,139 @@ class TransformerEncoder(nn.Module):
         return output
 
 
+# class TransformerDecoder(nn.Module):
+
+#     def __init__(self, decoder_layer, num_layers, norm=None, return_intermediate=False, 
+#                     d_model=256, query_dim=2, keep_query_pos=False, query_scale_type='cond_elewise',
+#                     modulate_hw_attn=False,
+#                     bbox_embed_diff_each_layer=False,
+#                     ):
+#         super().__init__()
+#         self.layers = _get_clones(decoder_layer, num_layers)
+#         self.num_layers = num_layers
+#         self.norm = norm
+#         self.return_intermediate = return_intermediate
+#         assert return_intermediate
+#         self.query_dim = query_dim
+
+#         assert query_scale_type in ['cond_elewise', 'cond_scalar', 'fix_elewise']
+#         self.query_scale_type = query_scale_type
+#         if query_scale_type == 'cond_elewise':
+#             self.query_scale = MLP(d_model, d_model, d_model, 2)
+#         elif query_scale_type == 'cond_scalar':
+#             self.query_scale = MLP(d_model, d_model, 1, 2)
+#         elif query_scale_type == 'fix_elewise':
+#             self.query_scale = nn.Embedding(num_layers, d_model)
+#         else:
+#             raise NotImplementedError("Unknown query_scale_type: {}".format(query_scale_type))
+        
+#         self.ref_point_head = MLP(query_dim // 2 * d_model, d_model, d_model, 2)
+        
+#         self.bbox_embed = None
+#         self.d_model = d_model
+#         self.modulate_hw_attn = modulate_hw_attn
+#         self.bbox_embed_diff_each_layer = bbox_embed_diff_each_layer
+
+
+#         if modulate_hw_attn:
+#             self.ref_anchor_head = MLP(d_model, d_model, 2, 2)
+
+        
+#         if not keep_query_pos:
+#             for layer_id in range(num_layers - 1):
+#                 self.layers[layer_id + 1].ca_qpos_proj = None
+
+#     def forward(self, tgt, memory,
+#                 tgt_mask: Optional[Tensor] = None,
+#                 memory_mask: Optional[Tensor] = None,
+#                 tgt_key_padding_mask: Optional[Tensor] = None,
+#                 memory_key_padding_mask: Optional[Tensor] = None,
+#                 pos: Optional[Tensor] = None,
+#                 refpoints_unsigmoid: Optional[Tensor] = None, # num_queries, bs, 2
+#                 ):
+#         output = tgt
+
+#         intermediate = []
+#         reference_points = refpoints_unsigmoid.sigmoid()
+#         ref_points = [reference_points]
+
+#         # import ipdb; ipdb.set_trace()        
+
+#         for layer_id, layer in enumerate(self.layers):
+#             obj_center = reference_points[..., :self.query_dim]     # [num_queries, batch_size, 2]
+#             # get sine embedding for the query vector
+#             query_sine_embed = gen_sineembed_for_position(obj_center)  
+#             query_pos = self.ref_point_head(query_sine_embed) 
+
+#             # For the first decoder layer, we do not apply transformation over p_s
+#             if self.query_scale_type != 'fix_elewise':
+#                 if layer_id == 0:
+#                     pos_transformation = 1
+#                 else:
+#                     pos_transformation = self.query_scale(output)
+#             else:
+#                 pos_transformation = self.query_scale.weight[layer_id]
+
+#             # apply transformation
+#             query_sine_embed = query_sine_embed[...,:self.d_model] * pos_transformation
+
+#             # modulated HW attentions
+#             if self.modulate_hw_attn:
+#                 refHW_cond = self.ref_anchor_head(output).sigmoid() # nq, bs, 2
+#                 query_sine_embed[..., self.d_model // 2:] *= (refHW_cond[..., 0] / obj_center[..., 2]).unsqueeze(-1)
+#                 query_sine_embed[..., :self.d_model // 2] *= (refHW_cond[..., 1] / obj_center[..., 3]).unsqueeze(-1)
+
+
+#             output = layer(output, memory, tgt_mask=tgt_mask,
+#                            memory_mask=memory_mask,
+#                            tgt_key_padding_mask=tgt_key_padding_mask,
+#                            memory_key_padding_mask=memory_key_padding_mask,
+#                            pos=pos, query_pos=query_pos, query_sine_embed=query_sine_embed,
+#                            is_first=(layer_id == 0))
+
+#             # iter update
+#             if self.bbox_embed is not None:
+#                 if self.bbox_embed_diff_each_layer:
+#                     tmp = self.bbox_embed[layer_id](output)
+#                 else:
+#                     tmp = self.bbox_embed(output)
+#                 # import ipdb; ipdb.set_trace()
+#                 tmp[..., :self.query_dim] += inverse_sigmoid(reference_points)
+#                 new_reference_points = tmp[..., :self.query_dim].sigmoid()
+#                 if layer_id != self.num_layers - 1:
+#                     ref_points.append(new_reference_points)
+#                 reference_points = new_reference_points.detach()
+
+#             if self.return_intermediate:
+#                 intermediate.append(self.norm(output))
+
+#         if self.norm is not None:
+#             output = self.norm(output)
+#             if self.return_intermediate:
+#                 intermediate.pop()
+#                 intermediate.append(output)
+
+#         if self.return_intermediate:
+#             if self.bbox_embed is not None:
+#                 return [
+#                     torch.stack(intermediate).transpose(1, 2),
+#                     torch.stack(ref_points).transpose(1, 2),
+#                 ]
+#             else:
+#                 return [
+#                     torch.stack(intermediate).transpose(1, 2), 
+#                     reference_points.unsqueeze(0).transpose(1, 2)
+#                 ]
+
+#         return output.unsqueeze(0)
+    
 class TransformerDecoder(nn.Module):
 
     def __init__(self, decoder_layer, num_layers, norm=None, return_intermediate=False, 
                     d_model=256, query_dim=2, keep_query_pos=False, query_scale_type='cond_elewise',
                     modulate_hw_attn=False,
                     bbox_embed_diff_each_layer=False,
+                    num_feature_levels=1
                     ):
         super().__init__()
         self.layers = _get_clones(decoder_layer, num_layers)
@@ -334,6 +475,7 @@ class TransformerDecoder(nn.Module):
         self.return_intermediate = return_intermediate
         assert return_intermediate
         self.query_dim = query_dim
+        self.num_feature_levels = num_feature_levels
 
         assert query_scale_type in ['cond_elewise', 'cond_scalar', 'fix_elewise']
         self.query_scale_type = query_scale_type
@@ -369,6 +511,8 @@ class TransformerDecoder(nn.Module):
                 memory_key_padding_mask: Optional[Tensor] = None,
                 pos: Optional[Tensor] = None,
                 refpoints_unsigmoid: Optional[Tensor] = None, # num_queries, bs, 2
+                level_start_index: Optional[Tensor] = None, # num_levels
+                spatial_shapes: Optional[Tensor] = None # bs, num_levels, 2
                 ):
         output = tgt
 
@@ -408,7 +552,9 @@ class TransformerDecoder(nn.Module):
                            tgt_key_padding_mask=tgt_key_padding_mask,
                            memory_key_padding_mask=memory_key_padding_mask,
                            pos=pos, query_pos=query_pos, query_sine_embed=query_sine_embed,
-                           is_first=(layer_id == 0))
+                           is_first=(layer_id == 0),
+                           level_start_index=level_start_index,
+                           spatial_shapes=spatial_shapes)
 
             # iter update
             if self.bbox_embed is not None:
@@ -779,7 +925,10 @@ class TransformerDecoderLayer(nn.Module):
                      pos: Optional[Tensor] = None,
                      query_pos: Optional[Tensor] = None,
                      query_sine_embed = None,
-                     is_first = False):
+                     is_first = False,
+                     level_start_index: Optional[Tensor] = None, # num_levels
+                     spatial_shapes: Optional[Tensor] = None # bs, num_levels, 2
+                     ):
                      
         # ========== Begin of Self-Attention =============
         if not self.rm_self_attn_decoder:
@@ -867,6 +1016,7 @@ def build_transformer(args):
         query_dim=4,
         activation=args.transformer_activation,
         num_patterns=args.num_patterns,
+        num_feature_levels=args.num_feature_levels
     )
 
 

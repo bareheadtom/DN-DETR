@@ -152,7 +152,8 @@ class BackboneBase(nn.Module):
             if not train_backbone or 'layer2' not in name and 'layer3' not in name and 'layer4' not in name:
                 parameter.requires_grad_(False)
         if return_interm_layers:
-            return_layers = {"layer1": "0", "layer2": "1", "layer3": "2", "layer4": "3"}
+            #return_layers = {"layer1": "0", "layer2": "1", "layer3": "2", "layer4": "3"}
+            return_layers = {"layer2": "0", "layer3": "1", "layer4": "2"}
         else:
             return_layers = {'layer4': "0"}
         self.body = IntermediateLayerGetter(backbone, return_layers=return_layers)
@@ -185,7 +186,8 @@ class Backbone(BackboneBase):
         elif name in ['swin_B_224_22k', 'swin_B_384_22k', 'swin_L_224_22k', 'swin_L_384_22k']:
             imgsize = int(name.split('_')[-2])
             backbone = build_swin_transformer(name, imgsize)
-        num_channels = 512 if name in ('resnet18', 'resnet34') else 2048
+        #num_channels = 512 if name in ('resnet18', 'resnet34') else 2048
+        num_channels = [512, 1024, 2048]
         super().__init__(backbone, train_backbone, num_channels, return_interm_layers)
 
 
@@ -220,7 +222,7 @@ def build_backbone(args):
     position_embedding = build_position_encoding(args)
     train_backbone = args.lr_backbone > 0
 
-    return_interm_layers = args.masks
+    return_interm_layers = True
     # if args.batch_norm_type == 'FrozenBatchNorm2d':
     #     batch_norm = FrozenBatchNorm2d
     # elif args.batch_norm_type == 'SyncBatchNorm':

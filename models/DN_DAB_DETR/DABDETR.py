@@ -79,7 +79,8 @@ class DABDETR(nn.Module):
                     bbox_embed_diff_each_layer=False,
                     random_refpoints_xy=False,
                     pre_encoder = None,
-                    two_stage = True
+                    two_stage = True,
+                    num_feature_levels = 1
                     ):
         """ Initializes the model.
         Parameters:
@@ -100,6 +101,7 @@ class DABDETR(nn.Module):
         self.num_queries = num_queries
         self.transformer = transformer
         self.hidden_dim = hidden_dim = transformer.d_model
+        self.num_feature_levels = num_feature_levels
         self.class_embed = nn.Linear(hidden_dim, num_classes)
         self.bbox_embed_diff_each_layer = bbox_embed_diff_each_layer
 
@@ -131,7 +133,32 @@ class DABDETR(nn.Module):
             self.refpoint_embed.weight.data[:, :2].requires_grad = False
 
         #self.input_proj_pre = nn.Conv2d(3, hidden_dim, kernel_size=1)
-        self.input_proj = nn.Conv2d(backbone.num_channels, hidden_dim, kernel_size=1)
+        #self.input_proj = nn.Conv2d(backbone.num_channels, hidden_dim, kernel_size=1)
+
+        # prepare input projection layers
+        if num_feature_levels > 1:
+            num_backbone_outs = len(backbone.num_channels)
+            input_proj_list = []
+            for _ in range(num_backbone_outs):
+                in_channels = backbone.num_channels[_]
+                input_proj_list.append(nn.Sequential(
+                    nn.Conv2d(in_channels, hidden_dim, kernel_size=1),
+                    nn.GroupNorm(32, hidden_dim),
+                ))
+            for _ in range(num_feature_levels - num_backbone_outs):
+                input_proj_list.append(nn.Sequential(
+                    nn.Conv2d(in_channels, hidden_dim, kernel_size=3, stride=2, padding=1),
+                    nn.GroupNorm(32, hidden_dim),
+                ))
+                in_channels = hidden_dim
+            self.input_proj = nn.ModuleList(input_proj_list)
+        else:
+            self.input_proj = nn.ModuleList([
+                nn.Sequential(
+                    nn.Conv2d(backbone.num_channels[-1], hidden_dim, kernel_size=1),
+                    nn.GroupNorm(32, hidden_dim),
+                )])
+
         self.backbone = backbone
         self.aux_loss = aux_loss
         self.iter_update = iter_update
@@ -159,7 +186,7 @@ class DABDETR(nn.Module):
         # if two_stage:
         #     # hack implementation for two-stage
         #     self.transformer.decoder.class_embed = self.class_embed
-        self.enhance_net_nopool = enhance_net_nopool(backbone.num_channels,backbone.num_channels)
+        #self.enhance_net_nopool = enhance_net_nopool(backbone.num_channels,backbone.num_channels)
             
 
 
@@ -195,21 +222,21 @@ class DABDETR(nn.Module):
         #print("max",torch.cuda.max_memory_allocated()/ (1024**3), samples.tensors.shape)
 
         features, pos = self.backbone(samples)
-        features = [features[-1]]
+        #features = [features[-1]]
         
 
         srcs = []
         masks = []
         for l, feat in enumerate(features):
             src,mask = feat.decompose()
-            srcs.append(self.input_proj(src))
+            srcs.append(self.input_proj[l](src))
             masks.append(mask)
             assert mask is not None
 
         #src_pre, mask_pre = features_pre[-1].decompose()
 
         src, mask = features[-1].decompose()
-        src = self.enhance_net_nopool(src)
+        #src = self.enhance_net_nopool(src)
         assert mask is not None
         # default pipeline
         tgt_embed_weight = self.tgt_embed.weight
@@ -544,6 +571,7 @@ def build_DABDETR(args):
         num_classes = 13
         
     device = torch.device(args.device)
+    args.num_feature_levels = 3
 
     backbone = build_backbone(args)
 
@@ -583,7 +611,8 @@ def build_DABDETR(args):
         iter_update=True,
         query_dim=4,
         random_refpoints_xy=args.random_refpoints_xy,
-        pre_encoder = pre_encoder
+        pre_encoder = pre_encoder,
+        num_feature_levels=args.num_feature_levels
     )
     if args.masks:
         model = DETRsegm(model, freeze_detr=(args.frozen_weights is not None))

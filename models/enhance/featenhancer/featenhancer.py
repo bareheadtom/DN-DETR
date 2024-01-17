@@ -303,15 +303,15 @@ class MultiScaleRepresentation(nn.Module):
 # Usage
 # Assuming input_image is your low-light RGB image tensor of shape (H, W, C)
 # Reshape it to a tensor of shape (1, C, H, W) to fit into the Conv2d module
-input_image = torch.randn(1, 3, 756, 1256).to('cuda')  # Replace torch.randn with your actual input tensor
+# input_image = torch.randn(1, 3, 756, 1256).to('cuda')  # Replace torch.randn with your actual input tensor
 
-# Create an instance of MultiScaleRepresentation
-model = MultiScaleRepresentation().to('cuda')
+# # Create an instance of MultiScaleRepresentation
+# model = MultiScaleRepresentation().to('cuda')
 
-# Pass the input through the model
-output = model(input_image)
-print("output",output.shape)
+# # Pass the input through the model
+# output = model(input_image)
+# print("output",output.shape)
 
-print(torch.cuda.memory_allocated()/ 1024**3)
+# print(torch.cuda.memory_allocated()/ 1024**3)
 # model.to('cpu')
 # stat(model,(3, 756, 1256))
