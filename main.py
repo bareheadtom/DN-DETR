@@ -28,7 +28,7 @@ from models import build_dab_dino_deformable_detr
 from util.utils import clean_state_dict
 from tensorboardX import SummaryWriter
 
-#python main.py -m dn_dab_detr --use_dn --finetune_ignore label_enc.weight class_embed --pretrain_model_path ./pretrained/dncheckpoint.pth
+#CUDA_VISIBLE_DEVICES=3 python main.py -m dn_dab_detr --use_dn --finetune_ignore label_enc.weight class_embed --pretrain_model_path ./pretrained/dncheckpoint.pth
 #python main.py -m dn_dab_detr --use_dn --finetune_ignore label_enc.weight class_embed --resume
 
 #python main.py -m dn_dab_dino_deformable_detr --use_dn --finetune_ignore label_enc.weight class_embed --pretrain_model_path ./pretrained/deformable_dndetr_encoderonly.pth
@@ -91,7 +91,7 @@ def get_args_parser():
     parser.add_argument('--lr_backbone', default=1e-5, type=float, 
                         help='learning rate for backbone')
 
-    parser.add_argument('--batch_size', default=4, type=int)
+    parser.add_argument('--batch_size', default=2, type=int)
     parser.add_argument('--weight_decay', default=1e-4, type=float)
     parser.add_argument('--epochs', default=300, type=int)
     parser.add_argument('--lr_drop', default=40, type=int)

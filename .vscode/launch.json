@@ -14,7 +14,11 @@
                 "--finetune_ignore", "label_enc.weight", "class_embed",
                 "--pretrain_model_path", "./pretrained/dncheckpoint.pth"
                 ] ,  // 执行脚本的附加参数，默认生成是没有的，可以自己加
-            "cwd":"${fileDirname}"
+            "cwd":"${fileDirname}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}",
+                "CUDA_VISIBLE_DEVICES": "3"
+            },
         }
     ]
 }

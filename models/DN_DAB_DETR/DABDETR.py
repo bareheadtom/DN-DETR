@@ -571,7 +571,7 @@ def build_DABDETR(args):
         num_classes = 13
         
     device = torch.device(args.device)
-    args.num_feature_levels = 3
+    args.num_feature_levels = 1
 
     backbone = build_backbone(args)
 
